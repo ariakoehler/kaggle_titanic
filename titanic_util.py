@@ -9,9 +9,13 @@ pi=np.pi; e=np.e
 
 #TODO document everything more thoroughly.
 
+#TODO implement NB, NN, and SVM to make predictions
+
 def load(opt='train'):
 
     '''Simplifies the loading of various csv files'''
+
+    #TODO get current working directory instead of my own personal file layout
     
     if opt=='train':
         address = '~/Dropbox/Education/Coding/Kaggle/titanic/train.csv'
@@ -35,7 +39,7 @@ def mung(data, attaching_keys, base_truth=None):
 
     '''Performs preprocessing on the data at hand and converts data to relevant types'''
 
-    #TODO implement workflow as a pipeline
+    #TODO implement workflow as a pipeline; or implement transforms as a decorator/parent class
     
     #age in context of family; do children in large families have better chance of suvival than children in small families etc.
       
@@ -57,6 +61,8 @@ def mung(data, attaching_keys, base_truth=None):
 
 def attach(target, base_data, data_key):
 
+    #TODO 
+    
     '''Accepts a two datasets and a key as args; 
     transforms subset of second dataset then adds it to first;
     returns appended dataset'''
@@ -102,10 +108,47 @@ def transform(data, key):
     if type(key)==np.ndarray:
         if (key == np.array(['Parch','SibSp'])).all():
             return Series(family_size(data))
+        if (key == np.array(['Sex','SibSp','Age'])).all():
+            return married(data)
         else:
             print('The combination {} does not have a transformation for derived data.'.format(key))
 
 
+def get_misclass(data, predictions, base_truth):
+
+    '''takes in data and tells you where prediction failed, so you can figure out new feature to add or variables to account for'''
+
+    return (predictions != base_truth).nonzero()
+
+
+def analyze_misclass(data, predictions, base_truth, display_an=True, return_an=False):
+
+    indices = get_misclass(data, predictions, base_truth)
+    
+    data_copy = DataFrame(data, copy=True); data_copy.columns = np.arange(data.shape[1])
+    data_misclass = DataFrame(data.iloc[indices]); data_misclass.columns = np.arange(data.shape[1])
+    
+    mu_overall = data_copy.mean(axis=0); mu_misclass = data_misclass.mean(axis=0)
+    sig_overall = data_copy.std(axis=0); sig_misclass = data_misclass.std(axis=0)
+
+    if display_an == True or return_an == True:
+        mean_overall = mu_overall.to_frame(name='mean_overall')
+        mean_misclass = mu_misclass.to_frame(name='mean_misclass')
+        std_overall = sig_overall.to_frame(name='std_overall')
+        std_misclass = sig_misclass.to_frame(name='std_misclass')
+        analysis = pd.concat([mean_overall, mean_misclass, std_overall, std_misclass],
+                             join='outer', axis=1)
+        analysis.index = data.columns
+    
+    if display_an == True:
+        display(analysis)
+        # display(mu_overall, mu_misclass, sig_overall, sig_misclass)
+
+    if return_an == True:
+        return analysis
+        # return mu_overall, mu_misclass, sig_overall, sig_misclass
+
+            
 def test_significance(data, key):
 
     '''For determining how relevant certain features are'''
@@ -142,9 +185,21 @@ def cabin_transform(data):
 
     '''Selects the cabin area and one-hot encodes it'''
     
-    # init = '\D.*'; trans = lambda s : re.search('\D', s).group()
+    return one_hot_encoding(Series(data['Cabin']).str.extract('(\D)', expand=False))
 
-    return one_hot_encoding(Series(data['Cabin']).str.extract('(\D)', expand=False))# {s : re.search('\D', s).group()}) 
+
+# def title(data):
+
+# one-hot encode people's titles(e.g. Mr., Mrs., Rev., Dr., Lord, HRH)
+
+#     return
+
+
+# def married(data):
+
+# select for anyone above 18 who has 1 sibsp; split into m and f
+
+#     return
 
 
 def family_size(data):
@@ -152,6 +207,17 @@ def family_size(data):
     '''Takes the sibsp and parch data and gets total family size'''
     
     return Series(data['SibSp'] + data['Parch']).rename('FamSize')
+
+
+def f1_score(predictions, base_truth):
+
+    true_pos = ((predictions == base_truth).astype(bool) and (base_truth.astype(bool))).sum()
+    all_pos = predictions.astype(bool).sum()
+    pos_truth = base_truth.astype(bool).sum()
+    
+    prec = true_pos / all_pos
+    rec = true_pos / pos_truth
+    return 2*prec*rec / (prec + rec)
 
 
 def sigmoid(z):
@@ -191,6 +257,8 @@ def one_hot_encoding(cat_data):
 
 def fill_nans(data):
 
+    #TODO find better way to fill missing values
+    
     incomplete = np.array(data)
     
     for i in range(incomplete.shape[1]):
@@ -205,6 +273,8 @@ def fill_nans(data):
     
 def grad_desc(X, y, theta_init, reg, cost, grad, tol=10**(-4), max_it=100, alpha=0.001):
 
+    #TODO implement checking for convergence
+    
     '''Implements gradient descent given variables from a particular optimization problem.'''
 
     theta = theta_init
@@ -220,6 +290,8 @@ def grad_desc(X, y, theta_init, reg, cost, grad, tol=10**(-4), max_it=100, alpha
 
 def split_train_cv(data, base_truth, portion_train=0.8):
 
+    #TODO split into train, cv, and test
+
     total_examples = data.shape[0]
 
     train_number = int(portion_train * total_examples)
@@ -233,7 +305,12 @@ def split_train_cv(data, base_truth, portion_train=0.8):
     
 class LogisticRegressor():
 
-    def __init__(self, lambd=1, tol=10**(-4), alpha=0.01, max_it=100):
+    #TODO implement preprocessing as part of regressor or in a pipeline
+    
+    #TODO also use existing ml libraries to do predictions, instead of building my own, shitty implementations
+    
+    def __init__(self, lambd=1, tol=10**(-4), alpha=0.01, max_it=100, metric='accuracy'):
+        self.metric=metric
         self.max_it=max_it
         self.lambd=lambd
         self.tol=tol
@@ -249,12 +326,10 @@ class LogisticRegressor():
         
     def cost_function(self, X, y, theta, lambd):
         
-        theta_reg = theta.copy(); theta_reg[0] = 0
-        m = len(y)
-        
-        def hypothesis(X):
-            return (sigmoid(np.dot(X,theta)))
-        
+        theta_reg = theta.copy(); theta_reg[0] = 0; m = len(y)
+
+        hypothesis = lambda X : sigmoid(np.dot(X,theta))
+                
         return (1/(2*m) * sum( -y*np.log(hypothesis(X)) - (1 - y) * np.log(1 - hypothesis(X))) ) + (lambd/(2*m)) * sum( theta_reg**2 )
 
             
@@ -262,22 +337,27 @@ class LogisticRegressor():
 
         theta_reg = theta.copy(); theta_reg[0] = 0; m = len(y)
 
-        def hypothesis(X):
-            return sigmoid(np.matmul(X,theta))
-
+        hypothesis = lambda X : sigmoid(np.dot(X,theta))
+        
         return (1/m) * Series((np.matmul(hypothesis(X) - y, X))  +  (lambd/m) * theta_reg)
 
 
-    def fit(self, X, y, portion_train=0.8, display_cost_log=False):
+    def fit(self, X, y, portion_train=0.8, display_cost_log=False, return_differences=False):
 
         X_train, y_train, X_val, y_val = split_train_cv(X, y, portion_train=portion_train)
 
         self.weights, cost_log = self.fit_grad_desc(X_train, y_train)
+
         if display_cost_log is not False:
             display(cost_log)
 
-        self.train_error = self.get_error(X_train, y_train)
-        self.cv_error = self.get_error(X_val, y_val)
+
+        if return_differences == True:
+            self.train_error = self.get_error(X_train, y_train, show_differences=True)
+            self.cv_error = self.get_error(X_val, y_val, show_differences=True)
+        else:
+            self.train_error = self.get_error(X_train, y_train)
+            self.cv_error = self.get_error(X_val, y_val)
 
         
     def fit_grad_desc(self, X, y):
@@ -291,18 +371,31 @@ class LogisticRegressor():
         return theta_result, cost_log
         
 
-    def get_error(self, X, y, metric='accuracy'):
+    def get_error(self, X, y, metric='accuracy', show_differences=False):
+
+        #TODO make proper call to analyze_misclass that includes all kwargs
 
         pred = self.predict(X)
-        err = (1 - np.mean(pred == y))*100
+
+        if metric == 'accuracy':
+            err = (1 - np.mean(pred == y))*100
+        elif metric == 'f1_score':
+            err = 1 - f1_score(pred, y)
+        else:
+            NotImplementedError('That metric has not yet been implemented.')
+
+            
+        if show_differences == True:
+            analyze_misclass(X, pred, y)
+        
         return err
         
         
-    def predict(self, X):
+    def predict(self, X, base_truth=None, show_differences=False):
 
         predictions = Series(heaviside(sigmoid(Series(np.matmul(X,self.weights))), threshold=0.5))
         predictions.index = X.index
-
+            
         return predictions
 
 
