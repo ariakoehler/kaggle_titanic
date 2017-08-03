@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import os
 
 import matplotlib.pyplot as plt
 
@@ -16,11 +17,13 @@ def load(opt='train'):
     '''Simplifies the loading of various csv files'''
 
     #TODO get current working directory instead of my own personal file layout
+
+    cwd = os.getcwd()
     
     if opt=='train':
-        address = '~/Dropbox/Education/Coding/Kaggle/titanic/train.csv'
+        address = os.path.join(cwd,'train.csv')
     elif opt=='test':
-        address = '~/Dropbox/Education/Coding/Kaggle/titanic/test.csv'
+        address = os.path.join(cwd,'test.csv')
     else:
         raise NameError('"{}" is not a valid loading input.'.format(opt))
     return pd.read_csv(address)
@@ -210,8 +213,8 @@ def family_size(data):
 
 
 def f1_score(predictions, base_truth):
-
-    true_pos = ((predictions == base_truth).astype(bool) and (base_truth.astype(bool))).sum()
+    
+    true_pos = (predictions * base_truth).sum()
     all_pos = predictions.astype(bool).sum()
     pos_truth = base_truth.astype(bool).sum()
     
@@ -284,6 +287,7 @@ def grad_desc(X, y, theta_init, reg, cost, grad, tol=10**(-4), max_it=100, alpha
         cost_log[:,i] = cost(X,y,theta,reg)
         gradient = grad(X,y,theta,reg)
         theta = (theta - alpha * gradient)
+        
         
     return theta, cost_log
 
@@ -376,6 +380,7 @@ class LogisticRegressor():
         #TODO make proper call to analyze_misclass that includes all kwargs
 
         pred = self.predict(X)
+        metric = self.metric
 
         if metric == 'accuracy':
             err = (1 - np.mean(pred == y))*100
@@ -436,18 +441,19 @@ class PCA():
         self.dec_mat = V
 
 
-    def project(self, X):
+    def project(self, X, print_weights=True):
 
         if self.pc_count is 'detect':
             self.pc_count = detect_principal_components(self, X, tol=0.05)
-        
-        Z =  np.matmul(X, self.enc_mat[:,:self.pc_count])
 
-        if self.task_type is 'visualize':
-            plt.scatter(Z[:,0], Z[:,1])
-            plt.show()
-        elif self.task_type is 'reduce_dim':
-            return Z
+        principal_components = self.enc_mat[:,:self.pc_count]
+            
+        Z =  np.matmul(X, principal_components)
+
+        if print_weights is True:
+            print(principal_components)
+
+        return Z
     
     def fit(self, X):
 
