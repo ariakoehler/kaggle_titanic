@@ -1,12 +1,15 @@
 import numpy as np
 import pandas as pd
 import os
+from collections import OrderedDict
 
 import matplotlib.pyplot as plt
 
 from pandas import Series, DataFrame
 
 pi=np.pi; e=np.e
+
+#TODO split into multiple files
 
 #TODO document everything more thoroughly.
 
@@ -15,8 +18,6 @@ pi=np.pi; e=np.e
 def load(opt='train'):
 
     '''Simplifies the loading of various csv files'''
-
-    #TODO get current working directory instead of my own personal file layout
 
     cwd = os.getcwd()
     
@@ -63,8 +64,6 @@ def mung(data, attaching_keys, base_truth=None):
     
 
 def attach(target, base_data, data_key):
-
-    #TODO 
     
     '''Accepts a two datasets and a key as args; 
     transforms subset of second dataset then adds it to first;
@@ -145,11 +144,9 @@ def analyze_misclass(data, predictions, base_truth, display_an=True, return_an=F
     
     if display_an == True:
         display(analysis)
-        # display(mu_overall, mu_misclass, sig_overall, sig_misclass)
 
     if return_an == True:
         return analysis
-        # return mu_overall, mu_misclass, sig_overall, sig_misclass
 
             
 def test_significance(data, key):
@@ -260,7 +257,7 @@ def one_hot_encoding(cat_data):
 
 def fill_nans(data):
 
-    #TODO find better way to fill missing values
+    #TODO find better way to fill missing values; try multiple imputation or maximum, a la http://www.bu.edu/sph/files/2014/05/Marina-tech-report.pdf sections 4.2.1 and 4.2.2
     
     incomplete = np.array(data)
     
@@ -275,20 +272,22 @@ def fill_nans(data):
 
     
 def grad_desc(X, y, theta_init, reg, cost, grad, tol=10**(-4), max_it=100, alpha=0.001):
-
-    #TODO implement checking for convergence
     
     '''Implements gradient descent given variables from a particular optimization problem.'''
 
     theta = theta_init
-    cost_log = np.zeros((X.shape[0],max_it))
-
+    cost_log = np.zeros(max_it)
+    finish=max_it
+    
     for i in range(max_it):
-        cost_log[:,i] = cost(X,y,theta,reg)
+        cost_log[i] = cost(X,y,theta,reg)
         gradient = grad(X,y,theta,reg)
         theta = (theta - alpha * gradient)
-        
-        
+        if abs(cost_log[i] - cost_log[i-1]) < tol:
+            break
+
+    print('converged after {} iterations.'.format(np.count_nonzero(cost_log)))
+    
     return theta, cost_log
 
 
@@ -300,8 +299,12 @@ def split_train_cv(data, base_truth, portion_train=0.8):
 
     train_number = int(portion_train * total_examples)
     train_index = np.sort(np.random.choice(data.index, train_number, replace=False))
-    train_set = data.iloc[train_index]; cv_set = data.iloc[~data.index.isin(train_index)]
-    train_truth = base_truth.iloc[train_index]; cv_truth = base_truth.iloc[~base_truth.index.isin(train_index)]
+
+    train_set = data.loc[train_index]
+    cv_set = data.iloc[~data.index.isin(train_index)]
+
+    train_truth = base_truth.loc[train_index]
+    cv_truth = base_truth.iloc[~base_truth.index.isin(train_index)]
     
     return train_set, train_truth, cv_set, cv_truth
 
@@ -333,10 +336,29 @@ class LogisticRegressor():
         theta_reg = theta.copy(); theta_reg[0] = 0; m = len(y)
 
         hypothesis = lambda X : sigmoid(np.dot(X,theta))
-                
+        
         return (1/(2*m) * sum( -y*np.log(hypothesis(X)) - (1 - y) * np.log(1 - hypothesis(X))) ) + (lambd/(2*m)) * sum( theta_reg**2 )
 
-            
+
+    def learning_curves(self, X, y, portion_train=0.8, run_count=1,
+                        min_val=10, max_val=100, step=10):
+
+        max_val=X.shape[0]
+        
+        train_error = OrderedDict({}); cv_error = OrderedDict({})
+        
+        for i in np.arange(min_val, max_val, step):
+            subset_ix = np.random.choice(np.arange(max_val), i, replace=False)
+            X_subset = X.iloc[subset_ix]
+            y_subset = y.iloc[subset_ix]
+            weights, train_error[i], cv_error[i] = self.fit(X_subset, y_subset,
+                                                   portion_train=portion_train,
+                                                   run_count=run_count)
+            print('Run with set of size {} successful.'.format(i))
+
+        return weights, train_error, cv_error
+
+    
     def gradient(self, X, y, theta, lambd):
 
         theta_reg = theta.copy(); theta_reg[0] = 0; m = len(y)
@@ -346,25 +368,36 @@ class LogisticRegressor():
         return (1/m) * Series((np.matmul(hypothesis(X) - y, X))  +  (lambd/m) * theta_reg)
 
 
-    def fit(self, X, y, portion_train=0.8, display_cost_log=False, return_differences=False):
+    def fit(self, X, y, portion_train=0.8, run_count=0,
+            display_cost_log=False, return_differences=False, return_errors=False):
 
+        # TODO Average over multiple runs to get more stable results; will require changing theta from being member data 
+        
         X_train, y_train, X_val, y_val = split_train_cv(X, y, portion_train=portion_train)
 
-        self.weights, cost_log = self.fit_grad_desc(X_train, y_train)
+        weights, cost_log = self.fit_grad_desc(X_train, y_train)
 
         if display_cost_log is not False:
             display(cost_log)
 
+        if return_differences is True and return_errors is False:
+            raise NotImplementedError('Cannot return differences and not return errors.')
 
-        if return_differences == True:
-            self.train_error = self.get_error(X_train, y_train, show_differences=True)
-            self.cv_error = self.get_error(X_val, y_val, show_differences=True)
+        #TODO clean up this API.
+        
+        if return_errors is True:
+            if return_differences is True:
+                return weights, self.get_error(X_train, y_train, weights, show_differences=True), self.get_error(X_val, y_val, weights, show_differences=True) 
+            else:
+                return weights, self.get_error(X_train, y_train, weights), self.get_error(X_val, y_val, weights)
+
         else:
-            self.train_error = self.get_error(X_train, y_train)
-            self.cv_error = self.get_error(X_val, y_val)
+            return weights
 
         
     def fit_grad_desc(self, X, y):
+
+        #TODO implement stochastic and mini-batch
         
         theta_len = X.shape[1]; theta_init = self.theta_init(theta_len)
        
@@ -373,13 +406,13 @@ class LogisticRegressor():
                                  max_it=self.max_it, alpha=self.alpha)
 
         return theta_result, cost_log
-        
+   
 
-    def get_error(self, X, y, metric='accuracy', show_differences=False):
+    def get_error(self, X, y, theta, metric='accuracy', show_differences=False):
 
         #TODO make proper call to analyze_misclass that includes all kwargs
 
-        pred = self.predict(X)
+        pred = self.predict(X, theta)
         metric = self.metric
 
         if metric == 'accuracy':
@@ -396,28 +429,34 @@ class LogisticRegressor():
         return err
         
         
-    def predict(self, X, base_truth=None, show_differences=False):
+    def predict(self, X, theta):
 
-        predictions = Series(heaviside(sigmoid(Series(np.matmul(X,self.weights))), threshold=0.5))
+        predictions = Series(heaviside(sigmoid(Series(np.matmul(X,theta))), threshold=0.5))
         predictions.index = X.index
             
         return predictions
 
+    def predict_proba(self, X, theta):
+
+        predictions = Series(sigmoid(Series(np.matmul(X,theta))))
+
+        predictions.index = X.index
+        
+        return predictions
 
 
-# class CVGridSearch():
-
-#     def __init__():
-
+    #TODO automate cross-validation search for hyperparams
 
 class PCA():
 
     #TODO find a way to initialize pc_count at the same place every time
 
-    #TODO be more specific with exception messages
+    #TODO detect number of PC's to use based on threshhold of variance
     
     def __init__(self, task_type='visualize',
                  pc_count='detect'):
+
+        #TODO be more specific with exception messages
 
         if task_type != 'visualize' and task_type != 'reduce_dim':
             raise ValueError('That is not a valid option for task_type.')
@@ -462,7 +501,57 @@ class PCA():
             return self.project(X)
         elif self.task_type == 'visualize':
             self.project(X)
-        
-    # def detect_principal_components(self, X, tol=0.05):
 
+
+class VotingEnsemble():
+
+    def __init__(self, classifier, number_runs=3):
+        self.classifier = classifier
+        self.number_runs = number_runs
+
+    def fit(self, X, y, portion_train=0.8, avg_type='geometric',
+            weighted=False):
+
+        results = np.zeros((self.number_runs, X.shape[1]))
+        errors = np.zeros(self.number_runs)
+
+        for i in range(self.number_runs):
+            # print(type(self.classifier))
+            results[i,:] = self.classifier.fit(X, y, portion_train=portion_train,
+                                               return_errors=False)
+            errors[i] = self.classifier.get_error(X, y, results[i,:])
+
+        if weighted is True:
+            weights = 1 - errors
+            return results, weights
+        else:
+            return results
+
+    def predict(self, X, params, weights=None, avg_type='geometric',
+                return_errors=True):
+
+        #TODO implement different averaging strategies
         
+        predictions = np.zeros((X.shape[0], self.number_runs))
+        
+        for i in range(self.number_runs):
+            predictions[:,i] = self.classifier.predict_proba(X, params[i])
+
+        if weights is not None:
+            if avg_type == 'geometric':
+                mean = (np.prod(predictions ** weights, axis=1) ** (1/np.sum(weights)))
+                pred = heaviside(Series(mean), threshold=0.5)
+
+        return pred
+
+    def get_error(self, X, y, predictions, metric='accuracy'):
+
+        if metric == 'accuracy':
+            err = (1 - np.mean(predictions == y))*100
+        elif metric == 'f1_score':
+            err = 1 - f1_score(predictions, y)
+        else:
+            NotImplementedError('That metric has not yet been implemented.')
+
+        return err
+    
